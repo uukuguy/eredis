@@ -1,6 +1,12 @@
-.eunit
-deps
-*.o
 *.beam
 *.plt
+*.o
+.eunit
+apps/udbfs/ebin/*
+deps/*
+apps/legolas/ebin
+*~
+dev/*
+doc/*
+rel/legolas
 erl_crash.dump

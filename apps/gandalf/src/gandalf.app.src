@@ -1,0 +1,19 @@
+%% -*- erlang -*-
+%% ex: ft=erlang ts=4 sw=4 et
+{application, gandalf,
+    [
+        {description, "A distributed file system especially for massive small files."},
+        {vsn, "0.1.0"},
+        {registered, []},
+        {applications, [
+                kernel,
+                stdlib,
+                riak_kv,
+                cowboy
+            ]},
+        {mod, { gandalf_app, []}},
+        {env, [
+                %% Secondary code paths
+                {add_paths, []}
+            ]}
+    ]}.
