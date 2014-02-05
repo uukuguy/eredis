@@ -6,7 +6,7 @@ REBAR=rebar
 DEVS=dev1 dev2 dev3 #dev4 dev5 dev6 dev7 dev8
 DEPSFILE=deps-riak_kv-1.4.7.tar.gz
 
-.PHONY: deps rel stagedevrel
+.PHONY: deps rel stagedevrel tsung
 
 all: deps compile
 
@@ -75,6 +75,12 @@ devclean:
 ${DEVS}: all
 	mkdir -p dev
 	(cd rel && $(REBAR) generate target_dir=../dev/$@ overlay_vars=vars/$@.config)
+
+tsung:
+	tsung -f tsung/tsung.xml -l tsung/log -m - start && \
+		cd tsung/log && \
+		/usr/lib/tsung/bin/tsung_stats.pl
+
 
 
 ##

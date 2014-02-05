@@ -39,7 +39,7 @@
     }).
 
 -define(SERVER, ?MODULE).
--define(DEFAULT_PORT, 19040).
+-define(DEFAULT_SERVER_PORT, 18060).
 
 %% ============================== APIs ==============================
 %%
@@ -48,7 +48,8 @@ start_link(Port) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [Port], []).
 
 start_link() ->
-    start_link(?DEFAULT_PORT).
+    ServerPort = common_utils:get_env(gandalf, server_port, ?DEFAULT_SERVER_PORT),
+    start_link(ServerPort).
 
 stop() ->
     gen_server:cast(?SERVER, stop).
@@ -72,9 +73,13 @@ handle_cast(stop, State) ->
     {stop, normal, State}.
 
 handle_info({tcp, Socket, RawData}, State) ->
-    do_rpc(Socket, RawData),
+    ?DEBUG("Receive: ~p", [RawData]),
+    gen_tcp:send(Socket, io_lib:fwrite("~p~n", [RawData])),
+    %do_rpc(Socket, RawData),
     RequestCount = State#state.request_count,
     {noreply, State#state{request_count = RequestCount + 1}};
+handle_info({tcp_closed, _Socket}, State) ->
+    {noreply, State};
 handle_info(timeout, #state{lsock = LSock} = State) ->
     {ok, _Sock} = gen_tcp:accept(LSock),
     {noreply, State}.
@@ -90,28 +95,28 @@ code_change(_OldVsn, State, _Extra) ->
 %% ============================== Internal functions ==============================
 %%
 
-do_rpc(Socket, RawData) ->
-    ?DEBUG("Enter do_rpc", []),
-    try
-        {M, F, A} = split_out_mfa(RawData),
-        Result = apply(M, F, A),
-        gen_tcp:send(Socket, io_lib:fwrite("~p~n", [Result]))
-    catch
-        _Class:Err ->
-            ?ERROR("~p", [Err]),
-            gen_tcp:send(Socket, io_lib:fwrite("~p~n", [Err]))
-    end.
+%do_rpc(Socket, RawData) ->
+    %?DEBUG("Enter do_rpc", []),
+    %try
+        %{M, F, A} = split_out_mfa(RawData),
+        %Result = apply(M, F, A),
+        %gen_tcp:send(Socket, io_lib:fwrite("~p~n", [Result]))
+    %catch
+        %_Class:Err ->
+            %?ERROR("~p", [Err]),
+            %gen_tcp:send(Socket, io_lib:fwrite("~p~n", [Err]))
+    %end.
 
-split_out_mfa(RawData) ->
-    MFA = re:replace(RawData, "\r\n$", "", [{return, list}]),
-    {match, [M, F, A]} = 
-    re:run(MFA,
-        "(.*):(.*)\s*\\((.*)\s*\\)\s*.\s*$",
-        [{capture, [1,2,3], list}, ungreedy]),
-    {list_to_atom(M), list_to_atom(F), args_to_terms(A)}.
+%split_out_mfa(RawData) ->
+    %MFA = re:replace(RawData, "\r\n$", "", [{return, list}]),
+    %{match, [M, F, A]} = 
+    %re:run(MFA,
+        %"(.*):(.*)\s*\\((.*)\s*\\)\s*.\s*$",
+        %[{capture, [1,2,3], list}, ungreedy]),
+    %{list_to_atom(M), list_to_atom(F), args_to_terms(A)}.
 
-args_to_terms(RawArgs) ->
-    {ok, Tokens, _Line} = erl_scan:string("[" ++ RawArgs ++ "]. ", 1),
-    {ok, Args} = erl_parse:parse_term(Tokens),
-    Args.
+%args_to_terms(RawArgs) ->
+    %{ok, Tokens, _Line} = erl_scan:string("[" ++ RawArgs ++ "]. ", 1),
+    %{ok, Args} = erl_parse:parse_term(Tokens),
+    %Args.
 

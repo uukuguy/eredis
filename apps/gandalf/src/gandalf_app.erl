@@ -37,6 +37,11 @@ start(StartType, StartArgs) ->
     % 将核心模块相关的日志记录到log/gandalf.log中，方便调试。
     lager:trace_file("log/gandalf_debug.log", [{module, gandalf_app}], debug),
     lager:trace_file("log/gandalf_debug.log", [{module, gandalf_sup}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_command_vnode}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_cowboy_handler}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_server}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_server_protocol}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_server_sup}], debug),
 
     %% -------------------- gandalf_cowboy --------------------
     gandalf_cowboy_app:start(StartType, StartArgs),

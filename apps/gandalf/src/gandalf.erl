@@ -19,6 +19,9 @@
 -include_lib("riak_core/include/riak_core_vnode.hrl").
 -include_lib("riak_core/include/riak_core_ring.hrl").
 
+-type status() :: non_neg_integer() | binary().
+-export_type([status/0]).
+
 -define(TIMEOUT, 5000).
 
 %% ------------------------------ Public APIs ------------------------------

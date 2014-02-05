@@ -57,6 +57,11 @@ init(_Args) ->
         [gandalf_server]                  
     },
 
+    GandalfServerSup = {
+        gandalf_server_sup,
+        {gandalf_server_sup, start_link, []},
+        permanent, infinity, supervisor, [gandalf_server_sup]},
+
     CmdVNodeMaster = {
         gandalf_command_vnode_master,
         {riak_core_vnode_master, start_link, [gandalf_command_vnode]},
@@ -67,7 +72,8 @@ init(_Args) ->
 
     Children = lists:flatten([
                 %?IF(HasStorageBackend, Storage, []),
-                %GandalfServer
+                %GandalfServer,
+                GandalfServerSup,
                 CmdVNodeMaster
                ]),
 

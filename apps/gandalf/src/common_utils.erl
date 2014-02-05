@@ -94,12 +94,17 @@ get_env(App, Key, Default) ->
 %%%------------------------------------------------------------ 
 
 get_config_value(Key, Config, Default) ->
-    case orddict:find(Key, Config) of
-        error ->
-            Default;
-        {ok, Value} ->
-            Value
-    end.
+    proplists:get_value(Key, Config, Default).
+	%case lists:keyfind(Key, 1, Config) of
+		%{_, Value} -> Value;
+		%_ -> Default
+	%end.
+    %case orddict:find(Key, Config) of
+        %error ->
+            %Default;
+        %{ok, Value} ->
+            %Value
+    %end.
 
 get_nested_config(Key, Config, Category) ->
     case proplists:get_value(Key, Config) of
