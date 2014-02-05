@@ -37,6 +37,7 @@
 -record(state, {
 	socket :: inet:socket(),
 	transport :: module(),
+    %gandalf_redis_server_pid :: pid(),
 	compress :: boolean(),
     env :: env(),
 	max_empty_lines :: non_neg_integer(),
@@ -60,12 +61,16 @@ init(Ref, Socket, Transport, Opts) ->
 	MaxEmptyLines = common_utils:get_config_value(max_empty_lines, Opts, 5),
 	MaxRequestLineLength = common_utils:get_config_value(max_request_line_length, Opts, 4096),
 	Env = [{listener, Ref}|common_utils:get_config_value(env, Opts, [])],
-	Timeout = common_utils:get_config_value(timeout, Opts, 5000), %%infinity),
+	Timeout = common_utils:get_config_value(timeout, Opts, infinity),
 
     ok = ranch:accept_ack(Ref),
+
+    %GandalfRedisServerPid = gandalf_redis_server:start(Socket, Transport),
+
     loop(<<>>, #state{
             socket=Socket, 
             transport=Transport,
+            %gandalf_redis_server_pid=GandalfRedisServerPid,
             compress=Compress, 
             env=Env,
             max_empty_lines=MaxEmptyLines, 
@@ -76,26 +81,47 @@ init(Ref, Socket, Transport, Opts) ->
         
 %% ------------------------------ loop ------------------------------ 
 loop(Buffer, State) ->
-    {RestBuffer} = parse_command(Buffer, State),
-    loop(RestBuffer, State).
+    case parse_command(Buffer, State) of
+        {terminate} ->
+            ok;
+        {cancel} ->
+            loop(<<>>, State);
+        {RestBuffer} ->
+            loop(RestBuffer, State)
+    end.
 
 %% ============================== Internal Functions ==============================
 %%
 
 %% ------------------------------ do_command/2 ------------------------------ 
 %% @private
-do_command([], _State) ->
-    ok;
-do_command([Command | Arguments], _State) ->
-    ?DEBUG("do_command/2 Command: ~p Arguments: ~p", [Command, Arguments]),
-    %_RedisCmd = {Command, Arguments},
-    ok.
+do_command([], State) ->
+    {ok, State};
+do_command(Arguments, #state{
+        socket = Socket,
+        transport = Transport
+        %gandalf_redis_server_pid=GandalfRedisServerPid
+    } = State) ->
+    ?DEBUG("do_command/2 Arguments: ~p", [Arguments]),
+    spawn_link(
+        fun() ->
+                gandalf_redis_parser:start(Socket, Transport, Arguments)
+        end
+    ),
+    %gandalf_redis_server:start(Socket, Transport, Arguments),
+    %gandalf_redis_server:append_arguments(Arguments),
+    %gandalf_redis_server:execute(),
+    {ok, State}.
 
 %% ------------------------------ parse_command ------------------------------ 
 %% @private
 parse_command(Buffer, State) ->
     ParseNumOfArgumentsFunc = parse_num_of_arguments_fun(),
     case parse_line(Buffer, State, 0, ParseNumOfArgumentsFunc) of
+        {cancel} ->
+            {cancel};
+        {terminate} ->
+            {terminate};
         {error, Reason, RestBuffer} ->
             ?WARNING("parse_num_of_arguments/2 failed. Reason: ~p", [Reason]),
             {RestBuffer};
@@ -113,6 +139,10 @@ parse_command(Args, Buffer, State, Arguments) ->
 
     ParseArgumentBytesFunc = parse_argument_bytes_fun(),
     case parse_line(Buffer, State, 0, ParseArgumentBytesFunc) of
+        {cancel} ->
+            {cancel};
+        {terminate} ->
+            {terminate};
         {error, Reason, RestBuffer} ->
             ?WARNING("parse_argument_bytes/2 failed. Reason: ~p", [Reason]),
             {RestBuffer}; 
@@ -130,42 +160,56 @@ parse_command(Args, Buffer, State, Arguments) ->
 %% ------------------------------ parse_num_of_arguments_fun/0 ------------------------------ 
 %% @private
 parse_num_of_arguments_fun() ->
-    fun(Buffer, #state{socket=Socket, transport=Transport} = _State) ->
+    fun(Buffer, #state{socket=Socket, transport=Transport} = State) ->
             %?DEBUG("parse_num_of_arguments_fun Buffer: ~p",  [Buffer]),
             case Buffer of
                 <<"*", Rest/binary>> ->
                     {N, Rest1} = split_by_lf(Rest),
                     %?DEBUG("parse_method return ~p Rest1: ~p", [N, Rest1]),
-                    Args = list_to_integer(binary_to_list(N)),
-                    %?DEBUG("num of arguments: ~p", [Args]),
-                    {Args, Rest1};
+                    try
+                        Args = list_to_integer(binary_to_list(N)),
+                        %?DEBUG("num of arguments: ~p", [Args]),
+                        {Args, Rest1}
+                    catch
+                        _:_ ->
+                            Transport:send(Socket, <<"-ERR invalid number '", N/binary,"'\r\n">>),
+                            cancel_parse(401, State)
+                    end;
                 _ ->
                     {RestBuffer} = skip_line(Buffer),
                     ?DEBUG("parse_num_of_arguments not match. Buffer: ~p RestBuffer: ~p", [Buffer, RestBuffer]),
                     {C, _} = split_by_lf(Buffer),
                     Transport:send(Socket, <<"-ERR unknown command '", C/binary,"'\r\n">>),
-                    {error, unknown_command, RestBuffer}
+                    cancel_parse(402, State)
+                    %{error, unknown_command, RestBuffer}
             end
     end.
 
 %% ------------------------------ parse_argument_bytes_fun/0 ------------------------------ 
 %% @private
 parse_argument_bytes_fun() ->
-    fun(Buffer, #state{socket=Socket, transport=Transport} = _State) ->
+    fun(Buffer, #state{socket=Socket, transport=Transport} = State) ->
             %?DEBUG("parse_argument_bytes_fun Buffer: ~p",  [Buffer]),
             case Buffer of
                 <<"$", Rest/binary>> ->
                     {N, Rest1} = split_by_lf(Rest),
                     %?DEBUG("parse_argument_bytes return ~p Rest1: ~p", [N, Rest1]),
-                    ArgBytes = list_to_integer(binary_to_list(N)),
-                    %?DEBUG("argument bytes: ~p", [ArgBytes]),
-                    {ArgBytes, Rest1};
+                    try
+                        ArgBytes = list_to_integer(binary_to_list(N)),
+                        %?DEBUG("argument bytes: ~p", [ArgBytes]),
+                        {ArgBytes, Rest1}
+                    catch
+                        _:_ ->
+                            Transport:send(Socket, <<"-ERR invalid number '", N/binary,"'\r\n">>),
+                            cancel_parse(401, State)
+                    end;
                 _ ->
                     {RestBuffer} = skip_line(Buffer),
-                    ?DEBUG("parse_argument_bytes not match. Buffer: ~p RestBuffer", [Buffer, RestBuffer]),
+                    ?DEBUG("parse_argument_bytes not match. Buffer: ~p RestBuffer: ~p", [Buffer, RestBuffer]),
                     {C, _} = split_by_lf(Buffer),
                     Transport:send(Socket, <<"-ERR unknown command '", C/binary,"'\r\n">>),
-                    {error, unknown_command, RestBuffer}
+                    cancel_parse(402, State)
+                    %{error, unknown_command, RestBuffer}
             end
     end.
 
@@ -190,16 +234,16 @@ parse_line(Buffer, State=#state{max_request_line_length=MaxLength,
         <<>> ->
             wait_line(<<>>, State, ReqEmpty, ParseFunc);
         << $\n, _/binary >> ->
-            error_terminate(400, State);
+            cancel_parse(400, State);
         _ ->
             ?DEBUG("parse_line Buffer: ~p", [Buffer]),
             case match_eol(Buffer, 0) of
                 nomatch when byte_size(Buffer) > MaxLength ->
-                    error_terminate(414, State);
+                    cancel_parse(414, State);
                 nomatch ->
                     wait_line(Buffer, State, ReqEmpty, ParseFunc);
                 1 when ReqEmpty =:= MaxEmpty ->
-                    error_terminate(400, State);
+                    cancel_parse(400, State);
                 1 ->
                     << _:16, Rest/binary >> = Buffer,
                     parse_line(Rest, State, ReqEmpty + 1, ParseFunc);
@@ -213,6 +257,7 @@ parse_line(Buffer, State=#state{max_request_line_length=MaxLength,
 %-spec wait_line(binary(), #state{}, non_neg_integer()) -> ok.
 wait_line(Buffer, State=#state{socket=Socket, transport=Transport,
 		until=Until}, ReqEmpty, ParseFunc) ->
+    ?DEBUG("wait_line/4 Until: ~p", [Until]),
 	case recv(Socket, Transport, Until) of
 		{ok, Data} ->
 			parse_line(<< Buffer/binary, Data/binary >>, State, ReqEmpty, ParseFunc);
@@ -285,19 +330,25 @@ skip_line(<< C, Rest/bits >>) ->
 
 %% ------------------------------ error_teminate/2 ------------------------------ 
 %% @private
--spec error_terminate(gandalf:status(), #state{}) -> ok.
-error_terminate(_Status, 
-        State=#state{
-            socket=_Socket, 
-            transport=_Transport,
-            compress=_Compress
-        }) ->
-    terminate(State).
+-spec cancel_parse(gandalf:status(), #state{}) -> ok.
+cancel_parse(Status, #state{
+        socket=_Socket, 
+        transport=_Transport,
+        compress=_Compress
+    }) ->
+    ?DEBUG("gandalf_server_protocol cancel_parse Status : ~p", [Status]),
+    {cancel}.
 
 %% ------------------------------ teminate/1 ------------------------------ 
 %% @private
 -spec terminate(#state{}) -> ok.
-terminate(#state{socket=Socket, transport=Transport}) ->
+terminate(#state{
+        %gandalf_redis_server_pid=GandalfRedisServerPid,
+        socket=Socket, 
+        transport=Transport
+    }) ->
+    ?DEBUG("gandalf_server_protocol terminate!!", []),
+    %GandalfRedisServerPid ! stop,
 	Transport:close(Socket),
-	ok.
+    {terminate}.
 

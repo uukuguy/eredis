@@ -101,10 +101,11 @@ put_data(Path, Data, W) ->
 %% @doc 读出由路径Path唯一指定的数据块Data。
 %%      可以指定读参数，通常{r, 2}，表示完成2次成功读出才算成功。
 
--spec get_data(binary()) -> {ok, binary()} | {error, term()}.
+-spec get_data(binary()) -> {ok, binary()} | {error, notfound} | {error, timeout} | {error, term()}.
 get_data(Path) ->
     get_data(Path, []).
 
+-spec get_data(binary(), list()) -> {ok, binary()} | {error, not_found} | {error, timeout} | {error, term()}.
 get_data(Path, Options) when is_binary(Path), is_list(Options) ->
     ?NOTICE("call get_data/1", []),
     ?DEBUG("Enter get_data/1 Path = ~p", [Path]),
@@ -114,7 +115,16 @@ get_data(Path, Options) when is_binary(Path), is_list(Options) ->
     ReqId = common_utils:random_id(),
     riak_kv_get_fsm:start_link({raw, ReqId, Me}, Bucket, Key, Options),
     Timeout = spawn_timeout(Options),
-    wait_for_reqid(ReqId, Timeout);
+    Result = wait_for_reqid(ReqId, Timeout),
+    case Result of
+        {ok, Robj} ->
+            Value = riak_object:get_value(Robj),
+            {ok, Value};
+        {error, notfound} ->
+            {error, notfound};
+        _ -> 
+            Result
+    end;
 get_data(Path, R) ->
     get_data(Path, [{r, R}]).
 
