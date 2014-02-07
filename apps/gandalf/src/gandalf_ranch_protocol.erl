@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 2014-02-05 00:41:55
 %%%------------------------------------------------------------ 
--module(gandalf_server_protocol).
+-module(gandalf_ranch_protocol).
 -behaviour(ranch_protocol).
 -include("global.hrl").
 
@@ -35,16 +35,17 @@
 -export_type([redis_cmd/0]).
 
 -record(state, {
-	socket :: inet:socket(),
-	transport :: module(),
-    %gandalf_redis_server_pid :: pid(),
-	compress :: boolean(),
-    env :: env(),
-	max_empty_lines :: non_neg_integer(),
-	max_request_line_length :: non_neg_integer(),
-	timeout :: timeout(),
-	until :: non_neg_integer() | infinity
-}).
+        reqid,
+        socket :: inet:socket(),
+        transport :: module(),
+        protocol_server_pid :: pid(),
+        compress :: boolean(),
+        env :: env(),
+        max_empty_lines :: non_neg_integer(),
+        max_request_line_length :: non_neg_integer(),
+        timeout :: timeout(),
+        until :: non_neg_integer() | infinity
+    }).
 
 %% ============================== APIs ==============================
 %%
@@ -61,16 +62,17 @@ init(Ref, Socket, Transport, Opts) ->
 	MaxEmptyLines = common_utils:get_config_value(max_empty_lines, Opts, 5),
 	MaxRequestLineLength = common_utils:get_config_value(max_request_line_length, Opts, 4096),
 	Env = [{listener, Ref}|common_utils:get_config_value(env, Opts, [])],
-	Timeout = common_utils:get_config_value(timeout, Opts, infinity),
+    Timeout = common_utils:get_config_value(timeout, Opts, 300000), 
+
+    ReqId = self(),
+    gandalf_protocol_parser:start({ReqId, Socket, Transport}),
 
     ok = ranch:accept_ack(Ref),
 
-    %GandalfRedisServerPid = gandalf_redis_server:start(Socket, Transport),
-
     loop(<<>>, #state{
+            reqid=ReqId,
             socket=Socket, 
             transport=Transport,
-            %gandalf_redis_server_pid=GandalfRedisServerPid,
             compress=Compress, 
             env=Env,
             max_empty_lines=MaxEmptyLines, 
@@ -98,19 +100,23 @@ loop(Buffer, State) ->
 do_command([], State) ->
     {ok, State};
 do_command(Arguments, #state{
-        socket = Socket,
-        transport = Transport
-        %gandalf_redis_server_pid=GandalfRedisServerPid
+        reqid = ReqId
+        %socket = Socket,
+        %transport = Transport,
     } = State) ->
+
     ?DEBUG("do_command/2 Arguments: ~p", [Arguments]),
-    spawn_link(
-        fun() ->
-                gandalf_redis_parser:start(Socket, Transport, Arguments)
-        end
-    ),
-    %gandalf_redis_server:start(Socket, Transport, Arguments),
-    %gandalf_redis_server:append_arguments(Arguments),
-    %gandalf_redis_server:execute(),
+
+    %spawn_link(
+        %fun() ->
+                %gandalf_redis_parser:start(Socket, Transport, Arguments)
+        %end
+    %),
+
+    %{ok} = gen_server:call(RedisServerPid, {execute, Arguments}),
+    %gen_server:cast(RedisServerPid, {execute, Arguments}),
+    gandalf_protocol_parser:execute(ReqId, Arguments),
+
     {ok, State}.
 
 %% ------------------------------ parse_command ------------------------------ 
@@ -150,10 +156,18 @@ parse_command(Args, Buffer, State, Arguments) ->
             ?DEBUG("parse_command ArgBytes: ~p", [_ArgBytes]),
 
             ParseArgumentFunc = parse_argument_fun(),
-            {Arg, RestBuffer2} = parse_line(RestBuffer1, State, 0, ParseArgumentFunc),
-            ?DEBUG("parse_command Arg: ~p", [Arg]),
-
-            parse_command(Args - 1, RestBuffer2, State, lists:append([Arguments, [Arg]]))
+            case parse_line(RestBuffer1, State, 0, ParseArgumentFunc) of
+                {cancel} ->
+                    {cancel};
+                {terminate} ->
+                    {terminate};
+                {error, Reason, RestBuffer} ->
+                    ?WARNING("parse_argument_bytes/2 failed. Reason: ~p", [Reason]),
+                    {RestBuffer}; 
+                {Arg, RestBuffer2} ->
+                    ?DEBUG("parse_command Arg: ~p", [Arg]),
+                    parse_command(Args - 1, RestBuffer2, State, lists:append([Arguments, [Arg]]))
+            end
     end.
 
 
@@ -230,6 +244,7 @@ parse_argument_fun() ->
 %-spec parse_line(binary(), #state{}, non_neg_integer()) -> ok.
 parse_line(Buffer, State=#state{max_request_line_length=MaxLength,
         max_empty_lines=MaxEmpty}, ReqEmpty, ParseFunc) ->
+
     case Buffer of
         <<>> ->
             wait_line(<<>>, State, ReqEmpty, ParseFunc);
@@ -256,12 +271,18 @@ parse_line(Buffer, State=#state{max_request_line_length=MaxLength,
 %% @private
 %-spec wait_line(binary(), #state{}, non_neg_integer()) -> ok.
 wait_line(Buffer, State=#state{socket=Socket, transport=Transport,
-		until=Until}, ReqEmpty, ParseFunc) ->
-    ?DEBUG("wait_line/4 Until: ~p", [Until]),
+		timeout=Timeout}, ReqEmpty, ParseFunc) ->
+
+    Until = until(Timeout),
 	case recv(Socket, Transport, Until) of
 		{ok, Data} ->
-			parse_line(<< Buffer/binary, Data/binary >>, State, ReqEmpty, ParseFunc);
-		{error, _} ->
+			parse_line(<< Buffer/binary, Data/binary >>, 
+                State, ReqEmpty, ParseFunc);
+        {error, timeout} ->
+            ?ERROR("recv/3 error. connection timeout : ~p ms", [Timeout]),
+            terminate(State);
+		{error, Reason} ->
+            ?ERROR("recv/3 error. Reason: ~p", [Reason]),
 			terminate(State)
 	end.
 
@@ -336,19 +357,22 @@ cancel_parse(Status, #state{
         transport=_Transport,
         compress=_Compress
     }) ->
-    ?DEBUG("gandalf_server_protocol cancel_parse Status : ~p", [Status]),
+    ?DEBUG("cancel_parse Status : ~p", [Status]),
     {cancel}.
 
 %% ------------------------------ teminate/1 ------------------------------ 
 %% @private
 -spec terminate(#state{}) -> ok.
 terminate(#state{
-        %gandalf_redis_server_pid=GandalfRedisServerPid,
+        protocol_server_pid=ProtocolServerPid,
         socket=Socket, 
         transport=Transport
     }) ->
-    ?DEBUG("gandalf_server_protocol terminate!!", []),
-    %GandalfRedisServerPid ! stop,
+
+    ?DEBUG("terminate!!", []),
+
+    gandalf_protocol_parser:stop(ProtocolServerPid),
+
 	Transport:close(Socket),
     {terminate}.
 

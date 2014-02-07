@@ -38,15 +38,24 @@ start(StartType, StartArgs) ->
     lager:trace_file("log/gandalf_debug.log", [{module, gandalf}], debug),
     lager:trace_file("log/gandalf_debug.log", [{module, gandalf_app}], debug),
     lager:trace_file("log/gandalf_debug.log", [{module, gandalf_sup}], debug),
-    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_command_vnode}], debug),
-    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_cowboy_handler}], debug),
-    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_server}], debug),
-    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_server_protocol}], debug),
-    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_server_sup}], debug),
-    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_redis_parser}], debug),
 
-    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_redis_server}], debug),
-    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_redis_server_sup}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_ranch_protocol}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_ranch_protocol_sup}], debug),
+
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_protocol_parser}], debug),
+    %lager:trace_file("log/gandalf_debug.log", [{module, gandalf_redis_parser}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_protocol_server}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_protocol_server_sup}], debug),
+
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_cowboy_app}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_cowboy_sup}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_cowboy_handler}], debug),
+
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_command_vnode}], debug),
+    lager:trace_file("log/gandalf_debug.log", [{module, gandalf_server}], debug),
+
+    %% -------------------- redis_server --------------------
+    gandalf_protocol_parser:init(),
 
     %% -------------------- gandalf_cowboy --------------------
     gandalf_cowboy_app:start(StartType, StartArgs),

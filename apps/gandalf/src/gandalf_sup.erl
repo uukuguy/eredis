@@ -57,10 +57,15 @@ init(_Args) ->
         [gandalf_server]                  
     },
 
-    GandalfServerSup = {
-        gandalf_server_sup,
-        {gandalf_server_sup, start_link, []},
-        permanent, infinity, supervisor, [gandalf_server_sup]},
+    GandalfRanchProtocolSup = {
+        gandalf_ranch_protocol_sup,
+        {gandalf_ranch_protocol_sup, start_link, []},
+        permanent, infinity, supervisor, [gandalf_ranch_protocol_sup]},
+
+    GandalfProtocolServerSup = {
+        gandalf_protocol_server_sup,
+        {gandalf_protocol_server_sup, start_link, []},
+        permanent, infinity, supervisor, [gandalf_protocol_server_sup]},
 
     CmdVNodeMaster = {
         gandalf_command_vnode_master,
@@ -73,8 +78,9 @@ init(_Args) ->
     Children = lists:flatten([
                 %?IF(HasStorageBackend, Storage, []),
                 %GandalfServer,
-                GandalfServerSup,
-                CmdVNodeMaster
+                CmdVNodeMaster,
+                GandalfProtocolServerSup,
+                GandalfRanchProtocolSup
                ]),
 
     %% 重启策略

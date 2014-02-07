@@ -141,8 +141,9 @@ accept_resource_func(Req, State) ->
 accept_resource_putdata_func() ->
     fun(Path, Data, Filesystem) ->
             case Filesystem of
-                %myfilesystem -> myfilesystem:put_data(Path, Data);
-                gandalf -> gandalf:put_data(Path, Data)
+                gandalf -> 
+                    EKey = gandalf:encode_kv_key(Path),
+                    gandalf:put_data(EKey, Data)
             end
     end.
 
@@ -167,8 +168,9 @@ provide_resource_func(Req, State) ->
 provide_resource_getdata_func() ->
     fun(Path, Filesystem) ->
             case Filesystem of
-                %myfilesystem -> myfilesystem:get_data(Path);
-                gandalf -> gandalf:get_data(Path)
+                gandalf -> 
+                    EKey = gandalf:encode_kv_key(Path),
+                    gandalf:get_data(EKey)
             end
     end.
 

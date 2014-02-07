@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 2014-02-05 00:45:29
 %%%------------------------------------------------------------ 
--module(gandalf_server_sup).
+-module(gandalf_ranch_protocol_sup).
 -behaviour(supervisor).
 -include("global.hrl").
 
@@ -17,7 +17,7 @@
 -export([init/1]).
 
 -define(SERVER, ?MODULE).
--define(DEFAULT_SERVER_PORT, 18080).
+-define(DEFAULT_SERVER_PORT, 18060).
 -define(DEFAULT_SERVER_LISTENERS, 100).
 
 %%%------------------------------------------------------------ 
@@ -38,11 +38,11 @@ init([]) ->
 
     Children = [
         ranch:child_spec( 
-            gandalf_server, Listeners, ranch_tcp,
+            gandalf_ranch_protocol, Listeners, ranch_tcp,
             [
                 {port, ServerPort}
             ],
-            gandalf_server_protocol,
+            gandalf_ranch_protocol,
             [
             ])
     ],

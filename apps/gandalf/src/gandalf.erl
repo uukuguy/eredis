@@ -26,14 +26,15 @@
 
 %% ------------------------------ Public APIs ------------------------------
 -export([
-         put_data/2, %% (Path:string(), Data:string()) -> ok | {error, term()}
-         put_data/3, %% (Path:string(), Data:string(), Options:list() | W:integer()) -> ok | {error, term()}
-         get_data/1, %% (Path:string()) -> {ok, Data} | {error, term()}
-         get_data/2, %% (Path:string(), Options:list() | R:integer()) -> {ok, Data} | {error, term()}
-         delete_data/1, %% (Path:string()) -> ok | {error, term()}
-         delete_data/2,  %% (Path:string(), Options:list() | DW:integer()) -> ok | {error, term()}
-         ping/0
-        ]).
+        put_data/2, %% (Path:string(), Data:string()) -> ok | {error, term()}
+        put_data/3, %% (Path:string(), Data:string(), Options:list() | W:integer()) -> ok | {error, term()}
+        get_data/1, %% (Path:string()) -> {ok, Data} | {error, term()}
+        get_data/2, %% (Path:string(), Options:list() | R:integer()) -> {ok, Data} | {error, term()}
+        delete_data/1, %% (Path:string()) -> ok | {error, term()}
+        delete_data/2,  %% (Path:string(), Options:list() | DW:integer()) -> ok | {error, term()}
+        encode_kv_key/1,
+        ping/0
+                            ]).
 
 %% ------------------------------ Helper APIs ------------------------------
 %-export([
@@ -178,4 +179,11 @@ wait_for_reqid(ReqId, Timeout) ->
     after Timeout ->
             {error, timeout}
     end.
+
+%% ------------------------------ encode key ------------------------------ 
+encode_kv_key(Key) ->
+    sext:encode({keyvalue, Key}).
+
+%decode_kv_key(B) ->
+    %sext:decode(B).
 

@@ -2,18 +2,23 @@
 %%% @author Jiangwen Su <uukuguy@gmail.com>
 %%% @copyright (C) 2014, lastz.org
 %%% @doc
-%%%     Redis解析程序。
+%%%     redis protocol parser.
 %%%
 %%% @end
-%%% Created : 2014-02-06 00:42:35
+%%% Created : 2014-02-07 19:13:34
 %%%------------------------------------------------------------ 
 
--module(gandalf_redis_parser).
+-module(gandalf_protocol_parser).
 -include("global.hrl").
 
 %% ------------------------------ APIs ------------------------------ 
 -export([
-        start/3
+        init/0,
+        start/1,
+        execute/2,
+        stop/1,
+
+        parse/3
     ]).
 
 %% ------------------------------ record ------------------------------ 
@@ -24,50 +29,86 @@
         transport
     }).
 
--define(SERVER, ?MODULE).
--define(DEFAULT_SERVER_PORT, 18060).
+-define(TABLE_ID, ?MODULE).
 
 %% ============================== APIs ==============================
 %%
 
-start(Socket, Transport, Arguments) ->
+%% ------------------------------ init ------------------------------ 
+init() ->
+    ?DEBUG("gandalf_protocol_parser:init/0", []),
+    ets:new(?TABLE_ID, [public, named_table]),
+    ok.
+
+%% ------------------------------ start ------------------------------ 
+start({ReqId, Socket, Transport}) ->
+    {ok, ProtocolServerPid} = gandalf_protocol_server:start({Socket, Transport}),
+    ?DEBUG("gandalf_protcol_parser/start1 ReqId: ~p gandalf_protocol_server pid: ~p", [ReqId, ProtocolServerPid]),
+    ets:insert(?TABLE_ID, {ReqId, ProtocolServerPid}),
+    ok.
+
+%% ------------------------------ execute ------------------------------ 
+%% async
+execute(ReqId, Arguments) ->
+    case ets:lookup(?TABLE_ID, ReqId) of
+        [{ReqId, ProtocolServerPid}] -> 
+            gandalf_protocol_server:execute(ProtocolServerPid, Arguments)
+    end.
+
+%% ------------------------------ stop ------------------------------ 
+stop(ReqId) ->
+    case ets:lookup(?TABLE_ID, ReqId) of
+        [{ReqId, ProtocolServerPid}] -> 
+            ets:match_delete(?TABLE_ID, {'_', ProtocolServerPid}),
+            gandalf_protocol_server:stop(ProtocolServerPid)
+    end.
+
+
+%% ============================== parse redis ==============================
+%%
+
+%% ------------------------------ parse ------------------------------ 
+parse(Socket, Transport, Arguments) ->
     ?DEBUG("Start Redis Parser Arguments: ~p", [Arguments]),
     State = #state{socket = Socket, transport = Transport},
     {ok, State1} = do_append_arguments(Arguments, State),
-    do_execute(State1),
+    parse(State1),
     {ok, State1}.
 
+parse(#state{
+        redis_args = RedisArgs
+    } = State) ->
+    ?DEBUG("parse/1 RedisArgs = ~p", [RedisArgs]),
+    %A = [ [binary_to_list(I),","] || I <- RedisArgs],
+    %B = list_to_binary(A),
+    %Transport:send(Socket, <<"+OK ", B/binary >>),
+    parse_loop(RedisArgs, State).
+
+%% ------------------------------ do_append_arguments ------------------------------ 
 do_append_arguments(Arguments, #state{redis_args = RedisArgs} = State) ->
     ?DEBUG("append_arguments RedisArgs: ~p Arguments: ~p", [RedisArgs, Arguments]),
     NewRedisArgs = lists:append([RedisArgs, Arguments]),
     ?DEBUG("append_arguments NewRedisArgs: ~p", [NewRedisArgs]),
     {ok, State#state{redis_args = NewRedisArgs}}.
 
-do_execute(#state{
-        redis_args = RedisArgs
-    } = State) ->
-    ?DEBUG("do_execute/1 RedisArgs = ~p", [RedisArgs]),
-    %A = [ [binary_to_list(I),","] || I <- RedisArgs],
-    %B = list_to_binary(A),
-    %Transport:send(Socket, <<"+OK ", B/binary >>),
-    execute_loop(RedisArgs, State).
 
-execute_loop([], _State) ->
+%% ------------------------------ parse_loop ------------------------------ 
+parse_loop([], _State) ->
     ok;
-execute_loop(RedisArgs, State) ->
-    {ok, State1} = execute(RedisArgs, State),
-    execute_loop(State1#state.redis_args, State1).
+parse_loop(RedisArgs, State) ->
+    {ok, State1} = do_parse(RedisArgs, State),
+    parse_loop(State1#state.redis_args, State1).
 
 %% ------------------------------ [] ------------------------------ 
-execute([], State) ->
+do_parse([], State) ->
     {ok, State};
 
 %% ------------------------------ SET ------------------------------ 
-execute([<<"SET">>, Key, Value | Rest], #state{
+do_parse([<<"SET">>, Key, Value | Rest], #state{
         socket = Socket,
         transport = Transport } = State) ->
 
-    EKey = encode_kv_key(Key),
+    EKey = gandalf:encode_kv_key(Key),
     case gandalf:put_data(EKey, Value) of
         ok ->
             Transport:send(Socket, <<"+OK\r\n">>);
@@ -78,11 +119,11 @@ execute([<<"SET">>, Key, Value | Rest], #state{
     {ok, State#state{redis_args=Rest}};
 
 %% ------------------------------ GET ------------------------------ 
-execute([<<"GET">>, Key | Rest], #state{
+do_parse([<<"GET">>, Key | Rest], #state{
         socket = Socket,
         transport = Transport} = State) ->
 
-    EKey = encode_kv_key(Key),
+    EKey = gandalf:encode_kv_key(Key),
     case gandalf:get_data(EKey) of
         {ok, Data} ->
             L = list_to_binary(common_utils:integer_to_list(size(Data), 10)),
@@ -100,7 +141,7 @@ execute([<<"GET">>, Key | Rest], #state{
     {ok, State#state{redis_args=Rest}};
 
 %% ------------------------------ Unknown Commands ------------------------------ 
-execute(RedisArgs, #state{
+do_parse(RedisArgs, #state{
         socket = Socket,
         transport = Transport} = State) ->
 
@@ -109,10 +150,4 @@ execute(RedisArgs, #state{
     Transport:send(Socket, <<"-ERR unknown command '", H/binary,"'\r\n">>),
     {ok, State#state{redis_args = []} }.
 
-
-encode_kv_key(Key) ->
-    sext:encode({keyvalue, Key}).
-
-%decode_kv_key(B) ->
-    %sext:decode(B).
 

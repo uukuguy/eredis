@@ -37,6 +37,15 @@ clean:
 distclean: clean devclean relclean
 	$(REBAR) delete-deps
 
+bench:
+	ab -n 10000 -c 50 http://localhost:18091/bashrc
+
+build:
+	./stopcluster.sh && make devrel && ./startcluster.sh
+
+tail:
+	tail -f dev/dev1/log/gandalf_debug.log
+
 test:
 	$(REBAR) skip_deps=true eunit
 
